@@ -25,6 +25,7 @@ export class BackgroundWorker {
 
     browser.runtime.onConnect.addListener((newPort) => {
       let port: browser.Runtime.Port | null = newPort;
+      const initialSenderId = newPort.sender ? getSenderId(newPort.sender) : null;
 
       const postMessage = (message: unknown) => {
         try {
@@ -111,9 +112,9 @@ export class BackgroundWorker {
         );
       };
 
-      port.onDisconnect.addListener((p) => {
+      newPort.onDisconnect.addListener((p) => { // Use newPort here
         log.debug("Disconnected .....", {
-          port,
+          port: newPort, // Logging newPort
           p,
           lastError: browser.runtime.lastError,
         });
@@ -121,15 +122,31 @@ export class BackgroundWorker {
 
         keepAlive.stop();
 
-        if (!port) {
-          log.error("Port is null in onDisconnect");
-          return;
+        if (initialSenderId) {
+          const storageKey = AvmExecutor.AVM_DOC_REF_STORAGE_PREFIX + initialSenderId;
+          // Fire and forget cleanup
+          browser.storage.session.remove(storageKey)
+            .then(() => {
+              log.debug(`AVM documentRef for initialSenderId ${initialSenderId} removed from session storage due to port disconnect.`);
+            })
+            .catch(storageError => {
+              log.error(`Failed to remove AVM documentRef for initialSenderId ${initialSenderId} (port disconnect):`, storageError);
+            });
         }
-        port.onMessage.removeListener(handleMessage);
-        port = null;
+
+        // Important: 'port' in this scope is the 'let port' variable which was an alias to newPort.
+        // If 'port' is already null here due to some other logic, newPort should be used.
+        // Assuming 'port' still holds the reference to newPort before it's nulled.
+        if (port) {
+          port.onMessage.removeListener(handleMessage);
+        } else if (newPort) {
+          // Fallback if port was already nulled, though ideally the state management is cleaner.
+          newPort.onMessage.removeListener(handleMessage);
+        }
+        port = null; // Null out the alias
       });
 
-      port.onMessage.addListener(handleMessage);
+      newPort.onMessage.addListener(handleMessage); // Listen on newPort
     });
     //   browser.runtime.onMessage.addListener((message) => {
     //     console.log("background message", message);
@@ -145,6 +162,7 @@ class AvmExecutor {
   // TODO: store this somewhere, so we can use it after worker is resumed??
   private documentRefs = new Map<SenderId, AVMIntegrationDocument>();
   private abortControllers = new Map<SenderId, AbortController>();
+  private static readonly AVM_DOC_REF_STORAGE_PREFIX = "avm_doc_ref_";
 
   public async run(data: ChannelMessage, senderId: SenderId) {
     return this.methods[data.method](data.args, senderId);
@@ -162,11 +180,25 @@ class AvmExecutor {
       }
       await this.apiClient.loadOrRegister();
     },
-    getQrCodeUrl: (args: unknown, senderId: SenderId): Promise<string> => {
+    getQrCodeUrl: async (args: unknown, senderId: SenderId): Promise<string> => {
       if (args !== null) {
         throw new Error("Invalid args");
       }
-      const doc = this.documentRefs.get(senderId);
+      let doc = this.documentRefs.get(senderId);
+      if (!doc) {
+        const storageKey = AvmExecutor.AVM_DOC_REF_STORAGE_PREFIX + senderId;
+        try {
+          const storedData = await browser.storage.session.get(storageKey);
+          if (storedData && storedData[storageKey]) {
+            doc = storedData[storageKey] as AVMIntegrationDocument; // Assuming direct cast is okay
+            this.documentRefs.set(senderId, doc); // Re-populate in-memory cache
+            log.debug(`AVM documentRef for senderId ${senderId} loaded from session storage.`);
+          }
+        } catch (storageError) {
+          log.error(`Failed to load AVM documentRef for senderId ${senderId} from session storage:`, storageError);
+          // If loading fails, doc remains undefined/null, and the original error will be thrown.
+        }
+      }
       if (!doc) {
         throw new Error("Document not found");
       }
@@ -178,10 +210,34 @@ class AvmExecutor {
         documentToSign as unknown as AVMDocumentToSign
       );
       this.documentRefs.set(senderId, documentRef);
+
+      const storageKey = AvmExecutor.AVM_DOC_REF_STORAGE_PREFIX + senderId;
+      try {
+        // Assuming documentRef is serializable. If not, extract serializable parts.
+        await browser.storage.session.set({ [storageKey]: documentRef });
+        log.debug(`AVM documentRef for senderId ${senderId} saved to session storage.`);
+      } catch (storageError) {
+        log.error(`Failed to save AVM documentRef for senderId ${senderId} to session storage:`, storageError);
+        // Decide if this failure should prevent the operation or just be logged.
+        // For now, just log, as the in-memory map will still work for the current session.
+      }
     },
 
     waitForSignature: async (args: unknown, senderId: SenderId) => {
-      const documentRef = this.documentRefs.get(senderId);
+      let documentRef = this.documentRefs.get(senderId);
+      if (!documentRef) {
+        const storageKey = AvmExecutor.AVM_DOC_REF_STORAGE_PREFIX + senderId;
+        try {
+          const storedData = await browser.storage.session.get(storageKey);
+          if (storedData && storedData[storageKey]) {
+            documentRef = storedData[storageKey] as AVMIntegrationDocument; // Assuming direct cast
+            this.documentRefs.set(senderId, documentRef); // Re-populate in-memory cache
+            log.debug(`AVM documentRef for senderId ${senderId} loaded from session storage for waitForSignature.`);
+          }
+        } catch (storageError) {
+          log.error(`Failed to load AVM documentRef for senderId ${senderId} from session storage (waitForSignature):`, storageError);
+        }
+      }
       if (!documentRef) {
         throw new Error("Document not found");
       }
@@ -216,6 +272,15 @@ class AvmExecutor {
       );
       clearTimeout(timeout);
       log.debug("res", res);
+
+      // Remove from session storage after successful signature
+      const storageKey = AvmExecutor.AVM_DOC_REF_STORAGE_PREFIX + senderId;
+      try {
+        await browser.storage.session.remove(storageKey);
+        log.debug(`AVM documentRef for senderId ${senderId} removed from session storage after successful signature.`);
+      } catch (storageError) {
+        log.error(`Failed to remove AVM documentRef for senderId ${senderId} from session storage after signature:`, storageError);
+      }
       return res;
     },
 
@@ -227,11 +292,19 @@ class AvmExecutor {
       abortController.abort("Aborted");
     },
 
-    reset: async (args: unknown, senderId: SenderId) => {
+    reset: async (args: unknown, senderId: SenderId): Promise<void> => {
       if (args !== null) {
         throw new Error("Invalid args");
       }
       this.documentRefs.delete(senderId);
+      // Also remove from session storage
+      const storageKey = AvmExecutor.AVM_DOC_REF_STORAGE_PREFIX + senderId;
+      try {
+        await browser.storage.session.remove(storageKey);
+        log.debug(`AVM documentRef for senderId ${senderId} removed from session storage.`);
+      } catch (storageError) {
+        log.error(`Failed to remove AVM documentRef for senderId ${senderId} from session storage:`, storageError);
+      }
     },
   };
 }
