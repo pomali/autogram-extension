@@ -1,3 +1,18 @@
+/*
+ * Vendored font files — no external requests at runtime.
+ *
+ * Sources (SIL Open Font License 1.1):
+ *   Anonymous Pro        — https://www.marksimonson.com/fonts/view/anonymous-pro
+ *                          npm: @fontsource/anonymous-pro
+ *   Source Sans 3        — https://github.com/adobe-fonts/source-sans
+ *                          npm: @fontsource-variable/source-sans-3
+ *   Source Sans Pro      — https://github.com/adobe-fonts/source-sans
+ *                          npm: @fontsource/source-sans-pro
+ *
+ * To update, install the relevant @fontsource package and copy the
+ * latin / latin-ext woff2 files from its `files/` directory here.
+ */
+
 /* Anonymous Pro - latin-ext */
 @font-face {
   font-family: 'Anonymous Pro';
