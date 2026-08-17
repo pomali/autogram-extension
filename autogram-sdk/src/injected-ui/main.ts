@@ -14,6 +14,7 @@ import { createLogger } from "../log";
 import { UserCancelledSigningException } from "../errors";
 import { isMobileDevice } from "../utils";
 import type { DesktopSigningState } from "../autogram-api/index";
+import { getExtensionBaseUrl } from "./extension-context";
 
 const log = createLogger("ag-sdk:root");
 
@@ -324,29 +325,13 @@ export class AutogramRoot extends LitElement {
   }
 
   addFonts() {
-    // TODO - replace with local version?
-    /*
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Anonymous+Pro:ital,wght@0,400;0,700;1,400;1,700&family=Source+Sans+3:ital,wght@0,200..900;1,200..900&display=swap" rel="stylesheet">
-    */
+    const baseUrl = getExtensionBaseUrl();
+    if (!baseUrl) return;
+
     const link = document.createElement("link");
-    link.rel = "preconnect";
-    link.href = "https://fonts.googleapis.com";
-
-    const link2 = document.createElement("link");
-    link2.rel = "preconnect";
-    link2.href = "https://fonts.gstatic.com";
-    link2.crossOrigin = "anonymous";
-
-    const link3 = document.createElement("link");
-    link3.rel = "stylesheet";
-    link3.href =
-      "https://fonts.googleapis.com/css2?family=Source+Sans+3:ital,wght@0,200..900;1,200..900&display=swap";
-
+    link.rel = "stylesheet";
+    link.href = `${baseUrl}static/fonts/fonts.css`;
     document.head.appendChild(link);
-    document.head.appendChild(link2);
-    document.head.appendChild(link3);
   }
 }
 

@@ -7,6 +7,15 @@ import {
 } from "../options/default";
 import { captureException } from "../sentry";
 import { maybeInsertUpvsJsFixes } from "../upvs-fixes";
+import { setExtensionBaseUrl } from "autogram-sdk/injected-ui/extension-context";
+
+// Capture the extension base URL synchronously while document.currentScript is still set.
+{
+  const src = (document.currentScript as HTMLScriptElement | null)?.src ?? "";
+  if (src) {
+    setExtensionBaseUrl(src.replace(/\/[^/]+$/, "/"));
+  }
+}
 
 const log = createLogger("ag-ext.ent.inject");
 try {

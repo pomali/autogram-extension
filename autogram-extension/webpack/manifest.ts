@@ -110,6 +110,8 @@ function generateManifest(
                 .map((key) => entries[key].map((x) => [x, x + ".map"]).flat())
                 .flat(),
               "static/logo-64.png",
+              "static/fonts/*.css",
+              "static/fonts/*.woff2",
             ],
             matches: enabledUrls,
           },
@@ -189,6 +191,8 @@ function generateManifest(
             .map((key) => entries[key].map((x) => [x, x + ".map"]).flat())
             .flat(),
           "static/logo-64.png",
+          "static/fonts/*.css",
+          "static/fonts/*.woff2",
           ...enabledUrls,
         ],
         // TODO check if this is needed
