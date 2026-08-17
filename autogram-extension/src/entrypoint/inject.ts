@@ -11,9 +11,9 @@ import { setExtensionBaseUrl } from "autogram-sdk/injected-ui/extension-context"
 
 // Capture the extension base URL synchronously while document.currentScript is still set.
 {
-  const src = (document.currentScript as HTMLScriptElement | null)?.src ?? "";
+  const src = (document.currentScript as HTMLScriptElement | null)?.src;
   if (src) {
-    setExtensionBaseUrl(src.replace(/\/[^/]+$/, "/"));
+    setExtensionBaseUrl(new URL("/", src).href);
   }
 }
 
