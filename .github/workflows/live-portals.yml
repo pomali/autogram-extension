@@ -1,0 +1,53 @@
+name: Live portals
+
+# Tests that depend on the production government portals: too flaky (and
+# too slow) to gate pull requests, valuable as an early warning that a
+# portal changed its signer.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Portal script drift (checksums)
+        if: always()
+        run: npm run test:portal-drift --workspace=autogram-extension
+
+      - name: Portal contract tests against freshly fetched scripts
+        if: always()
+        run: |
+          npm run fetch:portal-fixtures --workspace=autogram-extension
+          npm test --workspace=autogram-extension
+
+      - name: Install Chromium
+        if: always()
+        run: npx playwright install --with-deps chromium
+        working-directory: autogram-extension
+
+      - name: Live portal e2e
+        if: always()
+        # extensions need a headed Chromium → virtual display
+        run: xvfb-run -a npm run test:e2e --workspace=autogram-extension -- --trace retain-on-failure
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-results
+          path: autogram-extension/test-results
+          retention-days: 7

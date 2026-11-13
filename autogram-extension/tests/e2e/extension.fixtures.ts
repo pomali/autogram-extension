@@ -21,10 +21,20 @@ export const test = base.extend<{ context: BrowserContext }>({
         `extension build not found at ${DIST_PATH} — run \`npm run vite:build-dev\` first`
       );
     }
+    // Chromium ignores the HTTPS_PROXY environment variable; pass it on
+    // explicitly so the live-portal tests also run behind a corporate/CI
+    // proxy. Loopback stays direct (the fake Autogram desktop app).
+    const proxyServer = process.env.HTTPS_PROXY ?? process.env.https_proxy;
     const context = await chromium.launchPersistentContext("", {
       // Extensions require the real Chromium; the default headless shell
       // does not support them.
       channel: "chromium",
+      // Optional override for a Chromium that Playwright did not download
+      // itself (a system or sandbox-provided build).
+      executablePath: process.env.AE_E2E_CHROMIUM_PATH || undefined,
+      proxy: proxyServer
+        ? { server: proxyServer, bypass: "localhost,127.0.0.1" }
+        : undefined,
       args: [
         `--disable-extensions-except=${DIST_PATH}`,
         `--load-extension=${DIST_PATH}`,
