@@ -11,14 +11,14 @@ const DIST_PATH = path.resolve(
 /**
  * Playwright test with the built extension (dist/) loaded into a Chromium
  * persistent context — the only way Chromium loads extensions. Build it
- * first: `npm run vite:build-dev` (MV3 is the default).
+ * first: `npm run vite:build-e2e` (MV3 is the default).
  */
 export const test = base.extend<{ context: BrowserContext }>({
   // eslint-disable-next-line no-empty-pattern
   context: async ({}, use) => {
     if (!fs.existsSync(path.join(DIST_PATH, "manifest.json"))) {
       throw new Error(
-        `extension build not found at ${DIST_PATH} — run \`npm run vite:build-dev\` first`
+        `extension build not found at ${DIST_PATH} — run \`npm run vite:build-e2e\` first`
       );
     }
     // Chromium ignores the HTTPS_PROXY environment variable; pass it on

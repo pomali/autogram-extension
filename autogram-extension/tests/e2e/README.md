@@ -9,7 +9,7 @@ scripts but cannot see injection-level failures (content script timing,
 ## Prerequisites
 
 ```sh
-npm run vite:build-dev        # builds dist/ (MV3), loaded into Chromium
+npm run vite:build-e2e        # builds dist/ (MV3, fake AVM server), loaded into Chromium
 npx playwright install chromium
 ```
 
@@ -17,6 +17,11 @@ npx playwright install chromium
 - The real Autogram desktop app must **not** be running: the tests bind
   its port (37200) with a fake (`fake-autogram-desktop.ts`) that answers
   `GET /info` / `POST /sign`, so signing completes without an eID.
+- Port 37201 must be free: the mobile-signing tests run a fake Autogram v
+  mobile server there (`fake-avm-server.ts`). The e2e build
+  (`AE_AVM_BASE_URL`, refused for production builds) is the only build
+  that talks to it; `mobile-signing.spec.ts` refuses to run against any
+  other, so the tests can never upload to the production AVM server.
 
 Run with `npm run test:e2e` (rebuilds dist first) or `npx playwright
 test` directly.
@@ -31,6 +36,13 @@ Environment:
 The suite depends on third-party production sites, so it is not part of
 the PR checks; `.github/workflows/live-portals.yml` runs it on demand
 (manual trigger only) together with the checksum drift check.
+
+## Test doubles
+
+| Double                                  | Stands in for                                                                                               | Controls                                                                                                                                                                           |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fake-autogram-desktop.ts` (port 37200) | the Autogram desktop app: `GET /info`, `POST /sign`                                                         | `mode = "sign" \| "cancel"`, `signRequests`                                                                                                                                        |
+| `fake-avm-server.ts` (port 37201)       | the Autogram v mobile server **and the phone**: integrations, documents, paired devices, push notifications | `signDocument(guid)`, `pairDevice(integrationGuid)`, `expireDocument(guid)`, `failNextPolls(n, "drop" \| "error")`, plus the recorded `documents`, `integrations`, `notifications` |
 
 ## Three ways to reach a portal without logging in
 
@@ -72,3 +84,4 @@ the signing dialog, the background worker RPC — except:
 | `supported-sites-smoke.spec.ts`     | Public landing pages of slovensko.sk, financnasprava.sk, cep.financnasprava.sk and sluzby.orsr.sk: the inject bundle loads (no CSP/extension errors) and a page without D.Signer is left untouched.                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `popup.spec.ts`                     | Toolbar popup → options page. Offline.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `bridge-trust.spec.ts`              | The page ↔ extension bridge on a live portal: a page script can reach it (by design) but cannot obtain the phone-pairing URL.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `mobile-signing.spec.ts`            | Mobile signing against the fake AVM server, driven by schranka's live driver: upload + QR + delivery, cancel stops polling, server outages are retried, an expired document surfaces as an error, restore points across a page reload (restore, decline, other document, cancelled signing), and phone pairing through the extension-owned frame.                                                                                                                                                                                                                                                                                                  |

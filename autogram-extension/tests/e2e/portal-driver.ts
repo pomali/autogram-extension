@@ -104,3 +104,8 @@ export function readSignOutcome(page: Page): Promise<PortalSignOutcome> {
 export async function chooseDesktopSigning(page: Page) {
   await page.getByRole("button", { name: /v tomto počítači/ }).click();
 }
+
+/** Picks "sign on the phone" in the extension's signing dialog. */
+export async function chooseMobileSigning(page: Page) {
+  await page.getByRole("button", { name: /Podpísať v mobile/ }).click();
+}

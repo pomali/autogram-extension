@@ -28,6 +28,15 @@ const manifestVersion = parseInt(process.env.AE_MANIFEST_VERSION || "2", 10);
 const isProduction = process.env.NODE_ENV === "production";
 const includeDebugUrls = process.env.AE_INCLUDE_DEBUG_URLS === "1";
 const shouldWatch = process.argv.includes("--watch");
+// Points the extension at a different Autogram v mobile server — the e2e
+// tests use it to talk to a local fake (tests/e2e/fake-avm-server.ts).
+const avmBaseUrl = process.env.AE_AVM_BASE_URL ?? "";
+if (avmBaseUrl && isProduction) {
+  throw new Error(
+    "AE_AVM_BASE_URL must not be set for a production build: documents " +
+      "would be uploaded to a server other than the official one"
+  );
+}
 
 let commitHash: string;
 try {
@@ -60,6 +69,7 @@ const defineValues = {
   __IS_PRODUCTION__: JSON.stringify(isProduction),
   __INCLUDE_DEBUG_URLS__: JSON.stringify(includeDebugUrls),
   __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+  __AVM_BASE_URL__: JSON.stringify(avmBaseUrl),
 };
 
 function toPosixPath(filePath: string) {

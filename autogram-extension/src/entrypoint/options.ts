@@ -4,6 +4,7 @@ import { toSVG as bwipToSvg } from "@bwip-js/generic";
 import { get, set } from "idb-keyval";
 import { AutogramVMobileIntegration, type PairedDevice } from "autogram-sdk";
 import { getOptions } from "../options/content";
+import { withConfiguredAvmServer } from "../avm-server";
 import { createLogger } from "../log";
 import { getAvmIntegrationRegistrationInfo } from "../util-extension";
 
@@ -12,10 +13,12 @@ const log = createLogger("ag-ext.ent.options");
 if (!__IS_PRODUCTION__) {
   setLogLevel("debug");
 }
-const avmIntegration = new AutogramVMobileIntegration({
-  get,
-  set,
-});
+const avmIntegration = withConfiguredAvmServer(
+  new AutogramVMobileIntegration({
+    get,
+    set,
+  })
+);
 
 const PLATFORM_LABELS: Record<string, string> = {
   ios: "iOS",

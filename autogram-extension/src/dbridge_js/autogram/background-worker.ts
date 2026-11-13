@@ -24,6 +24,7 @@ import { createLogger } from "../../log";
 import { getAvmIntegrationRegistrationInfo } from "../../util-extension";
 import { getOptions } from "../../options/content";
 import { supportedSites } from "../../supported-sites";
+import { withConfiguredAvmServer } from "../../avm-server";
 import {
   PAIRING_URL_REQUEST,
   type PairingUrlResponse,
@@ -197,7 +198,7 @@ export class BackgroundWorker {
 
 class AvmExecutor {
   private client = new MobileClient(
-    new AutogramVMobileIntegration({ get, set })
+    withConfiguredAvmServer(new AutogramVMobileIntegration({ get, set }))
   );
   private restorePoints = new RestorePointStore(
     { get, set },
