@@ -1,5 +1,23 @@
 # Changelog
 
+## [5.0.0](https://github.com/pomali/autogram-extension/compare/v4.1.0...v5.0.0) (2026-11-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* sign(documents, parameters?, options?) is the only form of CombinedClient.sign / DesktopClient.sign; the old positional forms are gone. Signature parameters use the /api/v1/sign shape (form/profile). XDC parameters move to DocumentToSign.xdcParameters and visualizationWidth moves to options.presentation. The desktop channel method sign is renamed to signLegacy. DesktopSignatureParameters and DesktopAutogramDocument now name the /api/v1/sign types. See autogram-sdk/docs/MIGRATION.md.
+
+### Features
+
+* register AVM integration only when pairing, refresh paired devices, fix race ([#263](https://github.com/pomali/autogram-extension/issues/263)) ([5b917b1](https://github.com/pomali/autogram-extension/commit/5b917b14ae093f8b6cb0fc73676d4eb30a0e20ad))
+* support kosice, add generateGuid utility and enhance XadesBpXml identifier handling ([3dbd35c](https://github.com/pomali/autogram-extension/commit/3dbd35cfd0e2995be36ebf849cfe221f971eea17))
+* Vite + Turborepo build, redesigned SDK API (0.7.0), phone pairing and portal fixes ([#204](https://github.com/pomali/autogram-extension/issues/204)) ([354ef16](https://github.com/pomali/autogram-extension/commit/354ef16ef270b1d99d5d271b78507039e23a5e74))
+
+
+### Bug Fixes
+
+* default device notifications and signed document restore to true ([10600e8](https://github.com/pomali/autogram-extension/commit/10600e89755bf1e5dbe62fef836d906d1812d930))
+
 ## [4.1.0](https://github.com/slovensko-digital/autogram-extension/compare/v4.0.1...v4.1.0) (2026-11-06)
 
 
