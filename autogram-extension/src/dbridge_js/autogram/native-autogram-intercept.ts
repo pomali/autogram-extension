@@ -11,6 +11,7 @@ import {
   WebChannelCaller,
 } from "./channel/web";
 import { ExtensionOptions } from "../../options/default";
+import { pairingFrameUrl } from "./extension-pages";
 import { createLogger } from "../../log";
 
 const log = createLogger("ag-ext.native-autogram-intercept");
@@ -64,7 +65,7 @@ function getClient(
     const webChannelCaller = new WebChannelCaller();
     webChannelCaller.init();
     clientPromise = createAutogramClient({
-      mobileChannel: new AvmChannelWeb(webChannelCaller),
+      mobileChannel: new AvmChannelWeb(webChannelCaller, pairingFrameUrl()),
       desktopChannel: new AutogramDesktopChannel(webChannelCaller),
       pairingEnabled: extensionOptions.notifyPairedDevices,
     });

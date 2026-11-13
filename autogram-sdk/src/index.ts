@@ -65,6 +65,8 @@ export {
   AutogramAppVersionTooLowException,
   MultiDocumentSigningOnMobileException,
 } from "./errors";
+export { setLogLevel } from "./log";
+export type { LogLevel } from "./log";
 export type { AutogramErrorCode, SerializedAutogramError } from "./errors";
 
 export type {

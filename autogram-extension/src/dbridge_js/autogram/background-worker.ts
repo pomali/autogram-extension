@@ -23,6 +23,11 @@ import browser from "webextension-polyfill";
 import { createLogger } from "../../log";
 import { getAvmIntegrationRegistrationInfo } from "../../util-extension";
 import { getOptions } from "../../options/content";
+import { supportedSites } from "../../supported-sites";
+import {
+  PAIRING_URL_REQUEST,
+  type PairingUrlResponse,
+} from "./background-worker-messages";
 
 const log = createLogger("ag-ext.bg.worker");
 
@@ -42,10 +47,49 @@ export class BackgroundWorker {
   initListener() {
     log.debug("initListener");
     browser.runtime.onConnect.addListener(this.onConnectListener.bind(this));
+    browser.runtime.onMessage.addListener(
+      this.onPairingUrlRequest.bind(this) as Parameters<
+        typeof browser.runtime.onMessage.addListener
+      >[0]
+    );
+  }
+
+  /**
+   * Answers the pairing frame (entrypoint/pairing.ts) and nobody else: the
+   * request must come from a page of this extension. Content scripts —
+   * the only part of the extension a web page can talk to — report the web
+   * page's URL as their sender URL and are turned away.
+   */
+  onPairingUrlRequest(
+    message: unknown,
+    sender: browser.Runtime.MessageSender
+  ): Promise<PairingUrlResponse> | undefined {
+    if (!isPairingUrlRequest(message)) {
+      return undefined; // not ours — let other listeners answer
+    }
+    if (!isExtensionPage(sender)) {
+      log.warn("Pairing URL requested from outside the extension", sender.url);
+      return Promise.resolve({ ok: false });
+    }
+    return this.avm.pairingQrCodeUrl().then(
+      (pairingUrl) => ({ ok: true, pairingUrl }),
+      (error) => {
+        log.error("Preparing the pairing URL failed", error);
+        return { ok: false };
+      }
+    );
   }
 
   onConnectListener(newPort: browser.Runtime.Port) {
     log.debug("onConnect", newPort);
+
+    if (!isSupportedSiteContentScript(newPort.sender)) {
+      // Defence in depth: the bridge is meant for our content scripts on
+      // the supported portals only.
+      log.warn("Rejected a connection from", newPort.sender?.url);
+      newPort.disconnect();
+      return;
+    }
 
     const postFrame = (port: browser.Runtime.Port, frame: RpcResponseFrame) => {
       log.debug("background response", frame);
@@ -262,6 +306,18 @@ class AvmExecutor {
     return res;
   }
 
+  /**
+   * URL that pairs a phone with this extension. It carries a short-lived
+   * token that is sufficient for pairing, so it is only ever handed to
+   * extension pages (see {@link BackgroundWorker.onPairingUrlRequest}),
+   * never over the page-callable RPC service.
+   */
+  public async pairingQrCodeUrl(): Promise<string> {
+    // the MV3 worker may have restarted since the last init
+    await this.client.init(await getAvmIntegrationRegistrationInfo());
+    return this.client.pairingQrCodeUrl();
+  }
+
   readonly impl: RpcImpl<typeof avmService.methods> = {
     init: async () => {
       await this.client.init(await getAvmIntegrationRegistrationInfo());
@@ -278,13 +334,7 @@ class AvmExecutor {
       return request.qrCodeUrl();
     },
 
-    getPairingQrCodeUrl: async () => {
-      // also requested after signing, when the MV3 worker may have restarted
-      await this.client.init(await getAvmIntegrationRegistrationInfo());
-      return this.client.pairingQrCodeUrl();
-    },
-
-    addDocument: async ({ documentToSign }, context) => {
+    addDocument: async ({ documentToSign, restorePoint }, context) => {
       // Opt-in beta setting: only an explicit `true` enables notifications
       // (stored options from older versions lack the key).
       const { notifyPairedDevices } = await getOptions();
@@ -293,6 +343,10 @@ class AvmExecutor {
         { notifyDevices: notifyPairedDevices === true }
       );
       await set(dbKeyDocumentRef(context.senderId), request.token);
+      if (restorePoint) {
+        // bind the restore point to exactly the document uploaded for it
+        await this.restorePoints.save(restorePoint, request.token);
+      }
       return null;
     },
 
@@ -338,8 +392,12 @@ class AvmExecutor {
       return res;
     },
 
-    reset: async (_args, context) => {
+    reset: async ({ restorePoint }, context) => {
       await set(dbKeyDocumentRef(context.senderId), undefined);
+      if (restorePoint) {
+        // the signing ended while its page was alive: nothing to restore
+        await this.restorePoints.remove(restorePoint);
+      }
       // TODO: should we abort the request when resetting?
       this.abortControllers.delete(context.senderId);
       browser.alarms.clear("autogram-signature-timeout-" + context.senderId);
@@ -347,17 +405,14 @@ class AvmExecutor {
     },
 
     useRestorePoint: async ({ restorePoint }, context) => {
-      const currentToken =
-        (await get<AVMIntegrationDocument>(
-          dbKeyDocumentRef(context.senderId)
-        )) ?? null;
-
-      const result = await this.restorePoints.use(restorePoint, currentToken);
-      if (result.outcome === "none") {
+      // lookup only — the restore point is created by addDocument, for the
+      // document it identifies (never for whatever this sender had before)
+      const result = await this.restorePoints.use(restorePoint);
+      if (result.outcome !== "signed") {
         return null;
       }
       await set(dbKeyDocumentRef(context.senderId), result.token);
-      return result.outcome === "signed" ? result.signedObject : null;
+      return result.signedObject;
     },
   };
 }
@@ -436,6 +491,42 @@ function toAbortController(signal: AbortSignal): AbortController {
     });
   }
   return controller;
+}
+
+function isPairingUrlRequest(message: unknown): boolean {
+  return (
+    typeof message === "object" &&
+    message !== null &&
+    (message as { type?: unknown }).type === PAIRING_URL_REQUEST
+  );
+}
+
+/** A page of this extension (options, popup, the pairing frame). */
+function isExtensionPage(sender: browser.Runtime.MessageSender): boolean {
+  return (
+    sender.id === browser.runtime.id &&
+    typeof sender.url === "string" &&
+    sender.url.startsWith(browser.runtime.getURL(""))
+  );
+}
+
+/** One of our content scripts, running in a tab on a supported portal. */
+function isSupportedSiteContentScript(
+  sender: browser.Runtime.MessageSender | undefined
+): boolean {
+  if (!sender || sender.id !== browser.runtime.id || !sender.tab) {
+    return false;
+  }
+  if (typeof sender.url !== "string") {
+    // not every browser reports it; the id + tab checks above still hold
+    return true;
+  }
+  try {
+    supportedSites.matchUrl(sender.url);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 type SenderId = string;

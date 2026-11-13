@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="sk">
+  <head>
+    <meta charset="utf-8" />
+    <title>Autogram – párovací QR kód</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #fff;
+        font-family: system-ui, sans-serif;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+      }
+      #qr {
+        width: 100%;
+        max-width: 100vmin;
+      }
+      #qr svg {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+      #status {
+        margin: 0;
+        padding: 0 8px;
+        font-size: 14px;
+        text-align: center;
+        color: #333;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="qr" role="img" aria-label="Párovací QR kód"></div>
+    <p id="status" role="status">Pripravujem párovací QR kód…</p>
+    <script src="/autogram-pairing.bundle.js"></script>
+  </body>
+</html>

@@ -16,6 +16,7 @@ import {
 } from "./channel/web";
 import { InputObject } from "../ditecx/types";
 import { DSIGNER_VERSION_JSON } from "../ditecx/dsigner-version";
+import { pairingFrameUrl } from "./extension-pages";
 import { createLogger } from "../../log";
 import { ExtensionOptions } from "../../options/default";
 
@@ -101,7 +102,7 @@ export class DBridgeAutogramImpl implements ImplementationInterface {
     log.debug("Autogram options in init", extensionOptions);
     return new DBridgeAutogramImpl(
       await createAutogramClient({
-        mobileChannel: new AvmChannelWeb(webChannelCaller),
+        mobileChannel: new AvmChannelWeb(webChannelCaller, pairingFrameUrl()),
         desktopChannel: new AutogramDesktopChannel(webChannelCaller),
         onResetSignRequest: () => {},
         pairingEnabled: extensionOptions.notifyPairedDevices,
@@ -198,8 +199,11 @@ export class DBridgeAutogramImpl implements ImplementationInterface {
             ],
           };
           this.signRequest.signingStatus = SigningStatus.signed;
-          // Restored content is returned as-is (historical behavior).
-          return restored.content;
+          // same encoding contract as a fresh signature: callers of
+          // getSignedXmlWithEnvelope() expect the XML, not its base64
+          return decodeBase64
+            ? Base64.decode(restored.content)
+            : restored.content;
         }
       }
     }

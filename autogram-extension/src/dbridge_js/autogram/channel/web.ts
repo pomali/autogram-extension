@@ -102,9 +102,29 @@ export class AutogramDesktopChannel implements AutogramDesktopIntegrationInterfa
  */
 export class AvmChannelWeb implements AutogramVMobileIntegrationInterfaceStateful {
   private rpc: RpcClient<typeof avmService.methods>;
+  /**
+   * Restore point looked up for the signing in progress. Kept here, in the
+   * page, because that is exactly its lifetime: it is sent along with the
+   * document it identifies (so the background binds the two) and with the
+   * reset that ends the signing (so the background forgets it). A page
+   * that goes away mid-signing never resets — its restore point stays.
+   */
+  private restorePoint: string | null = null;
 
-  constructor(channel: WebChannelCaller) {
+  /**
+   * @param pairingFrameUrl URL of the extension page that renders the
+   * pairing QR code (see {@link getPairingQrCodeUrl}); without it pairing
+   * is not offered from the page.
+   */
+  constructor(
+    channel: WebChannelCaller,
+    private pairingFrameUrl: string | null = null
+  ) {
     this.rpc = createRpcClient(avmService, channel);
+    if (!pairingFrameUrl) {
+      // drop the notifications capability so the SDK never shows pairing UI
+      this.getPairingQrCodeUrl = undefined;
+    }
   }
 
   /* registration info is provided by the background worker itself */
@@ -114,11 +134,22 @@ export class AvmChannelWeb implements AutogramVMobileIntegrationInterfaceStatefu
   getQrCodeUrl(): Promise<string> {
     return this.rpc.getQrCodeUrl(null);
   }
-  getPairingQrCodeUrl(): Promise<string> {
-    return this.rpc.getPairingQrCodeUrl(null);
-  }
+  /**
+   * The pairing token must not reach the page (any of its scripts could
+   * take it and pair a phone of their own), so this returns the URL of an
+   * extension page instead; the SDK dialog embeds it as a frame the page
+   * cannot read into. The frame asks the background worker for the real
+   * pairing URL itself. A fresh query string makes the dialog reload the
+   * frame — that is how the SDK's periodic refresh keeps the QR valid.
+   */
+  getPairingQrCodeUrl?: () => Promise<string> = async () =>
+    `${this.pairingFrameUrl}?t=${Date.now()}`;
+
   async addDocument(documentToSign: AVMDocumentToSign): Promise<void> {
-    await this.rpc.addDocument({ documentToSign });
+    await this.rpc.addDocument({
+      documentToSign,
+      restorePoint: this.restorePoint ?? undefined,
+    });
   }
   async sendNotification(): Promise<void> {
     await this.rpc.sendNotification(null);
@@ -134,11 +165,17 @@ export class AvmChannelWeb implements AutogramVMobileIntegrationInterfaceStatefu
     });
   }
   async reset(): Promise<void> {
-    await this.rpc.reset(null);
+    const restorePoint = this.restorePoint ?? undefined;
+    this.restorePoint = null;
+    await this.rpc.reset({ restorePoint });
   }
-  useRestorePoint(restorePoint: string): Promise<SignedObject | null> {
+  async useRestorePoint(restorePoint: string): Promise<SignedObject | null> {
     log.debug("useRestorePoint", restorePoint);
-    return this.rpc.useRestorePoint({ restorePoint });
+    const restored = await this.rpc.useRestorePoint({ restorePoint });
+    // not signed yet: the upcoming addDocument() is the document this
+    // restore point stands for
+    this.restorePoint = restored ? null : restorePoint;
+    return restored;
   }
 }
 

@@ -6,8 +6,6 @@ import { AutogramBaseScreen } from "./base.screen";
 import { checkSvg } from "./svg";
 import type { PairedDevice } from "../avm-api/index";
 
-import { toSVG as bwipToSvg } from "@bwip-js/generic";
-
 /** Comma-separated display names, `""` when the devices have none. */
 export function pairedDeviceNames(devices: PairedDevice[]): string {
   return devices
@@ -78,14 +76,6 @@ export class AutogramSuggestPairingScreen extends AutogramBaseScreen {
   }
 
   renderPairing() {
-    const qrCode = bwipToSvg({
-      bcid: "qrcode",
-      text: this.pairingUrl,
-      scale: 6,
-      width: 100,
-      height: 100,
-    });
-
     return html`
       ${this.renderHeading("Spárujte mobil")}
       <div class="main">
@@ -107,7 +97,7 @@ export class AutogramSuggestPairingScreen extends AutogramBaseScreen {
               </button>
             </div>
           </div>
-          ${this.renderQrCode(this.pairingUrl, qrCode, "Párovací QR kód")}
+          ${this.renderPairingCode(this.pairingUrl, "Párovací QR kód")}
         </div>
       </div>
     `;

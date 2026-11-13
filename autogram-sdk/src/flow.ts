@@ -185,6 +185,21 @@ export class SigningFlow {
       { once: true }
     );
 
+    try {
+      return await this.runSigning(request, abortController, options);
+    } finally {
+      // Drop the mobile channel's "current request" however the ceremony
+      // ended. A cancelled or failed attempt must not leave its request
+      // (or restore point) behind for the next signing to pick up.
+      await this.resetMobile();
+    }
+  }
+
+  private async runSigning(
+    request: SignRequest,
+    abortController: AbortController,
+    options?: SigningFlowSignOptions
+  ): Promise<SignedDocumentResult> {
     let signingMethod: SigningMethod;
     if (request.documents.length > 1) {
       if (this.options.isMobileDevice?.()) {
@@ -521,9 +536,17 @@ export class SigningFlow {
     }
 
     this.delegate.onState(doneState(), abortController);
-    this.mobile.reset();
 
     return fromAvmSignedDocument(signedDocument);
+  }
+
+  /** Never throws: a failed reset must not mask the signing outcome. */
+  private async resetMobile(): Promise<void> {
+    try {
+      await this.mobile.reset();
+    } catch (e) {
+      log.warn("Resetting the mobile channel failed", e);
+    }
   }
 }
 

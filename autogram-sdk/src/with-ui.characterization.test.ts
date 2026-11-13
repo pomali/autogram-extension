@@ -112,6 +112,7 @@ type Root = HTMLElement & {
     reject(e: unknown): void;
   } | null;
   errorMessage: string;
+  renderRoot: ParentNode;
 };
 
 function root(): Root {
@@ -123,6 +124,12 @@ async function choose(method: SigningMethod) {
     await new Promise((r) => setTimeout(r, 0));
   }
   root().choiceResult!.resolve(method);
+}
+
+async function waitForChooser() {
+  for (let i = 0; i < 100 && !root().choiceResult; i++) {
+    await new Promise((r) => setTimeout(r, 0));
+  }
 }
 
 const argsOf = (calls: Calls, name: string) =>
@@ -371,6 +378,100 @@ describe("CombinedClient.sign errors", () => {
     const error = await pending.catch((e) => e);
     expect(AutogramError.is(error, "server-error")).toBe(true);
     expect(root().errorMessage).toBe("Signing failed badly");
+  });
+
+  test("errors that are not AutogramErrors also reach the error screen", async () => {
+    // e.g. a raw fetch TypeError while preparing mobile signing: the
+    // dialog must not stay on the method chooser / QR code
+    await setup();
+    mobile.addDocument = async () => {
+      throw new TypeError("Failed to fetch");
+    };
+    const pending = client.sign({
+      content: "<a/>",
+      mimeType: "application/xml",
+    });
+    await choose(SigningMethod.mobile);
+    await expect(pending).rejects.toThrow("Failed to fetch");
+    expect(root().errorMessage).toBe(
+      "Podpisovanie zlyhalo. Skúste to, prosím, znova."
+    );
+  });
+
+  test("dismissing the dialog itself (Escape) rejects the method choice", async () => {
+    await setup();
+    const pending = client.sign({
+      content: "<a/>",
+      mimeType: "application/xml",
+    });
+    await waitForChooser();
+    // what the browser does on Escape: closes the <dialog>, fires `close`
+    const dialog = root().renderRoot.querySelector("dialog")!;
+    dialog.open = false;
+    dialog.dispatchEvent(new Event("close"));
+
+    const error = await pending.catch((e) => e);
+    expect(AutogramError.is(error, "user-cancelled")).toBe(true);
+  });
+
+  test("a second sign() while one is running is turned away, the first continues", async () => {
+    await setup();
+    const first = client.sign({ content: "<a/>", mimeType: "application/xml" });
+    await waitForChooser();
+
+    const second = await client
+      .sign({ content: "<b/>", mimeType: "application/xml" })
+      .catch((e) => e);
+    expect(AutogramError.is(second, "aborted")).toBe(true);
+
+    // the first signing still owns the dialog and completes normally
+    await choose(SigningMethod.reader);
+    await expect(first).resolves.toMatchObject({ content: "aGVsbG8gc2lnbmVk" });
+    expect(
+      desktop.calls.filter(([name]) => name === "signLegacy")
+    ).toHaveLength(1);
+
+    // and the guard is released afterwards
+    const third = client.sign({ content: "<c/>", mimeType: "application/xml" });
+    await choose(SigningMethod.reader);
+    await expect(third).resolves.toBeDefined();
+  });
+
+  test("the mobile request is released when signing fails", async () => {
+    await setup();
+    mobile.waitForSignature = async () => {
+      throw new AutogramError("connection-failed", "offline");
+    };
+    const pending = client.sign({
+      content: "<a/>",
+      mimeType: "application/xml",
+    });
+    await choose(SigningMethod.mobile);
+    await expect(pending).rejects.toMatchObject({ code: "connection-failed" });
+    expect(mobile.calls.map(([name]) => name)).toContain("reset");
+  });
+});
+
+describe("AutogramRoot restore point prompt", () => {
+  test("closing the prompt answers it with 'do not restore'", async () => {
+    await setup();
+    mobile.useRestorePoint = async () => ({
+      content: "cmVzdG9yZWQ=",
+      signedBy: "CN=A",
+      issuedBy: "CN=B",
+    });
+    const pending = client.useRestorePoint("rp");
+    for (
+      let i = 0;
+      i < 100 && !root().renderRoot.querySelector("dialog")?.open;
+      i++
+    )
+      await new Promise((r) => setTimeout(r, 0));
+    const dialog = root().renderRoot.querySelector("dialog")!;
+    dialog.open = false;
+    dialog.dispatchEvent(new Event("close"));
+
+    await expect(pending).resolves.toBeNull();
   });
 });
 

@@ -1,3 +1,4 @@
+import { setLogLevel } from "autogram-sdk";
 import browser from "webextension-polyfill";
 import { toSVG as bwipToSvg } from "@bwip-js/generic";
 import { get, set } from "idb-keyval";
@@ -7,6 +8,10 @@ import { createLogger } from "../log";
 import { getAvmIntegrationRegistrationInfo } from "../util-extension";
 
 const log = createLogger("ag-ext.ent.options");
+// the SDK is quiet by default; development builds get its debug output
+if (!__IS_PRODUCTION__) {
+  setLogLevel("debug");
+}
 const avmIntegration = new AutogramVMobileIntegration({
   get,
   set,

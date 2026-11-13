@@ -23,9 +23,11 @@ type Logger = loglevel.Logger & {
   >;
 };
 
+/** Development builds (and tests, where the define is absent) log everything. */
+const VERBOSE = typeof __IS_PRODUCTION__ === "undefined" || !__IS_PRODUCTION__;
+
 export function createLogger(name: string | symbol) {
   const log: Logger = loglevel.getLogger(name) as Logger;
-  log.enableAll();
 
   log.listeners = [];
   log.addListener = function (
@@ -58,7 +60,11 @@ export function createLogger(name: string | symbol) {
       rawMethod(loggerName.toString() + ": ", ...messages);
     };
   };
-  log.rebuild();
+  // Release builds log warnings and errors only: debug/info output carries
+  // the documents being signed and signing URLs, and the inject bundle
+  // logs into the console of the government portal it runs in.
+  // `false`: never persist the level into the host page's localStorage.
+  log.setLevel(VERBOSE ? "trace" : "warn", false);
 
   // prefix.apply(log, {
   //   format(level, name, timestamp) {

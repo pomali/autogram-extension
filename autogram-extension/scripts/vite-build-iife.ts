@@ -46,6 +46,7 @@ const entryInputs: Record<string, string> = {
   ),
   popup: path.resolve(projectRoot, "src/entrypoint/popup.ts"),
   options: path.resolve(projectRoot, "src/entrypoint/options.ts"),
+  pairing: path.resolve(projectRoot, "src/entrypoint/pairing.ts"),
   redirect: path.resolve(projectRoot, "src/entrypoint/redirect.ts"),
 };
 

@@ -104,16 +104,6 @@ export class AutogramSignMobileScreen extends AutogramBaseScreen {
       return this.renderPairingDone(this.pairedDevices);
     }
 
-    const qrCode = this.pairingUrl
-      ? bwipToSvg({
-          bcid: "qrcode",
-          text: this.pairingUrl,
-          scale: 6,
-          width: 100,
-          height: 100,
-        })
-      : null;
-
     return html`
       ${this.renderHeading("Spárujte si tento počítač")}
       <div class="main">
@@ -139,8 +129,8 @@ export class AutogramSignMobileScreen extends AutogramBaseScreen {
               </button>
             </div>
           </div>
-          ${this.pairingUrl && qrCode
-            ? this.renderQrCode(this.pairingUrl, qrCode, "Párovací QR kód")
+          ${this.pairingUrl
+            ? this.renderPairingCode(this.pairingUrl, "Párovací QR kód")
             : html`<p>Párovací QR kód sa nepodarilo pripraviť.</p>`}
         </div>
       </div>

@@ -4,6 +4,7 @@ import { z } from "zod/v4-mini";
 import { paths } from "./avm-api.generated";
 import { Base64 } from "js-base64";
 import { createLogger } from "../../log";
+import { AutogramError } from "../../errors";
 import { SignedObject } from "../../types";
 import type { ZodKeysOf, ZodShapeOf } from "../../zod-shape";
 
@@ -361,21 +362,67 @@ export class AutogramVMobileIntegration implements AutogramVMobileIntegrationPri
       throw new Error("Document guid, key or last-modified missing");
     }
 
-    while (!abortController.signal.aborted) {
-      const documentResult = await this.apiClient.getDocument(
-        { guid: documentRef.guid },
-        documentRef.encryptionKey,
-        documentRef.lastModified
-      );
-      log.debug(documentResult);
-      if (documentResult.status === "signed") {
-        return documentResult.document;
-      } else if (documentResult.status === "pending") {
-        // wait
+    const { signal } = abortController;
+    // Transient failures (network drop, laptop sleep, a suspended mobile
+    // browser tab, a 5xx) must not lose a signature the user is about to
+    // make on the phone: keep polling, backing off, and give up only when
+    // the server stays unreachable for a long stretch.
+    let consecutiveFailures = 0;
+    let consecutiveNotFound = 0;
+
+    while (!signal.aborted) {
+      let delayMs = POLL_INTERVAL_MS;
+      try {
+        const documentResult = await this.apiClient.getDocument(
+          { guid: documentRef.guid },
+          documentRef.encryptionKey,
+          documentRef.lastModified,
+          signal
+        );
+        consecutiveFailures = 0;
+        if (documentResult.status === "signed") {
+          return documentResult.document;
+        }
+        if (documentResult.status === "not found") {
+          // the server deletes documents after 24 h; a few 404s are
+          // tolerated in case the upload is not visible everywhere yet
+          consecutiveNotFound++;
+          if (consecutiveNotFound >= POLL_MAX_NOT_FOUND) {
+            throw new AutogramError(
+              "timeout",
+              "Dokument na podpis už nie je dostupný. Skúste podpísať znova."
+            );
+          }
+        } else {
+          consecutiveNotFound = 0;
+        }
+      } catch (error) {
+        if (signal.aborted) {
+          break;
+        }
+        if (!isTransientPollError(error)) {
+          throw error;
+        }
+        consecutiveFailures++;
+        if (consecutiveFailures >= POLL_MAX_FAILURES) {
+          throw new AutogramError(
+            "connection-failed",
+            "Nepodarilo sa spojiť so serverom Autogram v mobile. Skontrolujte pripojenie na internet a skúste to znova.",
+            { cause: error }
+          );
+        }
+        log.warn(
+          `Polling for the signature failed (${consecutiveFailures}), retrying`,
+          error
+        );
+        delayMs = Math.min(
+          POLL_INTERVAL_MS * 2 ** consecutiveFailures,
+          POLL_MAX_BACKOFF_MS
+        );
       }
-      await wait(1000);
+      await wait(delayMs, signal);
     }
-    throw new Error("Aborted");
+    throw new AutogramError("aborted", "Waiting for signature aborted");
   }
 
   // private methods
@@ -514,6 +561,11 @@ export interface AutogramVMobileIntegrationInterfaceStateful {
    * {@link sendNotification} and {@link getPairedDevices}. Channels that
    * implement all three get the pairing UI; channels that skip them are
    * signed by per-document QR scan only.
+   *
+   * A browser extension may return the URL of one of its own pages
+   * (`chrome-extension://…`, `moz-extension://…`) instead: the dialog then
+   * embeds that page as a frame rather than rendering a QR code, so the
+   * pairing token never enters the host page.
    *
    * @returns URL string
    */
@@ -709,7 +761,8 @@ export class AutogramVMobileIntegrationApiClient {
   async getDocument(
     params: paths[typeof this._getDocument]["get"]["parameters"]["path"],
     documentEncryptionKey: string,
-    documentLastModified?: string
+    documentLastModified?: string,
+    signal?: AbortSignal
   ): Promise<GetDocumentResult> {
     if (!documentEncryptionKey) {
       throw new Error("Document encryption key missing");
@@ -726,6 +779,7 @@ export class AutogramVMobileIntegrationApiClient {
             ? { "If-Modified-Since": documentLastModified }
             : null),
         },
+        signal,
       }
     );
     if (res.status == 304) {
@@ -735,18 +789,18 @@ export class AutogramVMobileIntegrationApiClient {
       return { status: "not found" };
     }
     if (res.status != 200) {
+      let message = `API Error: ${res.status} ${res.statusText}`;
       try {
         const error = ApiErrorResponse.parse(await res.json());
-        log.error("API Error", error);
-        throw new Error(JSON.stringify(error));
+        message = JSON.stringify(error);
       } catch (e) {
-        log.error(
-          "API Error with non-JSON response",
-          res.status,
-          res.statusText
-        );
-        throw new Error(`API Error: ${res.status} ${res.statusText}`);
+        // non-JSON error body: keep the status line
       }
+      log.error("API Error", message);
+      if (res.status >= 500 || res.status === 429) {
+        throw new TransientApiError(message);
+      }
+      throw new AutogramError("server-error", message);
     }
 
     const resJson = await res.json();
@@ -918,8 +972,44 @@ export function randomUUID() {
   return globalThis.crypto.randomUUID();
 }
 
-async function wait(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+const POLL_INTERVAL_MS = 1000;
+const POLL_MAX_BACKOFF_MS = 15_000;
+/** ~10 minutes of an unreachable server with the backoff above */
+const POLL_MAX_FAILURES = 45;
+const POLL_MAX_NOT_FOUND = 5;
+
+/** A {@link AvmApiClient.getDocument} failure worth retrying. */
+class TransientApiError extends Error {}
+
+/**
+ * Network-level `fetch` rejections (always a `TypeError`) and 5xx/429
+ * responses are worth retrying; anything else (4xx, malformed response,
+ * our own `AutogramError`s) is final.
+ */
+function isTransientPollError(error: unknown): boolean {
+  if (AutogramError.is(error)) {
+    return false;
+  }
+  return error instanceof TransientApiError || error instanceof TypeError;
+}
+
+/** Resolves after `ms`, or right away when `signal` aborts. */
+function wait(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 const INTEGRATION_LOCK = "autogram-sdk:integration";

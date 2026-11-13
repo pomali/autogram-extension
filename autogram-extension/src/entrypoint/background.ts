@@ -1,8 +1,13 @@
+import { setLogLevel } from "autogram-sdk";
 import { BackgroundWorker } from "../dbridge_js/autogram/background-worker";
 import browser from "webextension-polyfill";
 import { createLogger } from "../log";
 
 const log = createLogger("ag-ext.ent.bg");
+// the SDK is quiet by default; development builds get its debug output
+if (!__IS_PRODUCTION__) {
+  setLogLevel("debug");
+}
 try {
   log.debug("background");
 

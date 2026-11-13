@@ -164,6 +164,18 @@ See [docs/API.md](./docs/API.md) for the full API reference,
 Generated TypeDoc reference is published at
 https://slovensko-digital.github.io/autogram-extension/autogram-sdk/.
 
+## Logging
+
+The SDK logs only warnings and errors by default. Its debug output contains
+the documents being signed, signing URLs (including the document key) and
+pairing tokens, so turn it on only while developing:
+
+```js
+import { setLogLevel } from "autogram-sdk";
+
+setLogLevel("debug"); // "trace" | "debug" | "info" | "warn" | "error" | "silent"
+```
+
 ## Advanced usage — channels
 
 For most web applications the basic usage above is all you need — `CombinedClient.init()` called without arguments works out of the box.

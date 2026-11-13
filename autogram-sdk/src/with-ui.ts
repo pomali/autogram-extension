@@ -154,6 +154,8 @@ export class CombinedClient {
   private flow: SigningFlow;
   /** whether the desktop screen was already opened for the current sign() */
   private desktopScreenActive = false;
+  /** a {@link sign} ceremony is running — see the guard there */
+  private signingInProgress = false;
 
   private constructor(
     private ui: AutogramRoot,
@@ -317,6 +319,16 @@ export class CombinedClient {
     parameters?: SignatureParameters,
     options?: ClientSignOptions
   ): Promise<SignedDocumentResult> {
+    if (this.signingInProgress) {
+      // One dialog, one signing: a second request (a double click, a
+      // portal retrying) would replace the first one's screens and share
+      // its mobile request. Turn it away without touching the dialog.
+      throw new AutogramError(
+        "aborted",
+        "Another signing is already in progress"
+      );
+    }
+    this.signingInProgress = true;
     try {
       this.desktopScreenActive = false;
 
@@ -351,11 +363,19 @@ export class CombinedClient {
         // the desktop screen already shows the appVersionTooLow state
         log.error("Autogram app version too low", e);
         throw e;
-      } else if (AutogramError.is(e)) {
-        this.ui.showError(e.message);
       }
+      // Everything else gets the error screen — including errors that are
+      // not AutogramErrors, so the dialog never stays on a screen (QR code,
+      // method choice) whose signing has already failed.
+      this.ui.showError(
+        AutogramError.is(e)
+          ? e.message
+          : "Podpisovanie zlyhalo. Skúste to, prosím, znova."
+      );
       log.error("Signing failed", e);
       throw e;
+    } finally {
+      this.signingInProgress = false;
     }
   }
 

@@ -13,6 +13,7 @@ import {
   SignatureRequest,
 } from "./mobile";
 import { createLogger } from "./log";
+import { AutogramError } from "./errors";
 import { SignedObject } from "./types";
 
 const log = createLogger("ag-sdk:AvmSimpleChannel");
@@ -59,6 +60,11 @@ export class AvmSimpleChannel implements AutogramVMobileIntegrationInterfaceStat
 
   private request: SignatureRequest | null = null;
   private abortController: AbortController | null = null;
+  /**
+   * Restore point looked up for the signing in progress; bound to the
+   * request once its document is uploaded, forgotten on {@link reset}.
+   */
+  private restorePoint: string | null = null;
 
   constructor(private options: AvmSimpleChannelOptions = {}) {
     const storage = options.storage ?? { get, set };
@@ -84,6 +90,9 @@ export class AvmSimpleChannel implements AutogramVMobileIntegrationInterfaceStat
     this.request = await this.client.requestSignature(documentToSign, {
       notifyDevices: this.options.notifyDevices ?? true,
     });
+    if (this.restorePoint) {
+      await this.restorePoints.save(this.restorePoint, this.request.token);
+    }
   }
   async sendNotification(): Promise<void> {
     await this.currentRequest().notifyDevices();
@@ -91,23 +100,51 @@ export class AvmSimpleChannel implements AutogramVMobileIntegrationInterfaceStat
   getPairedDevices(): Promise<PairedDevice[]> {
     return this.client.pairedDevices();
   }
-  async waitForSignature(): Promise<AVMSignedDocument> {
+  async waitForSignature(
+    externalAbortController?: AbortController
+  ): Promise<AVMSignedDocument> {
     const request = this.currentRequest();
     // TODO abort when tab is closed
-    this.abortController = new AbortController();
+    const abortController = new AbortController();
+    this.abortController = abortController;
 
+    // the caller's controller (the dialog's close button) must stop the
+    // polling — otherwise a "cancelled" request keeps running and can
+    // still resolve later, on top of the next signing
+    const externalSignal = externalAbortController?.signal;
+    const onExternalAbort = () => abortController.abort(externalSignal?.reason);
+    if (externalSignal?.aborted) {
+      onExternalAbort();
+    } else {
+      externalSignal?.addEventListener("abort", onExternalAbort, {
+        once: true,
+      });
+    }
+
+    let timedOut = false;
     const timeout = setTimeout(() => {
-      this.abortController?.abort("Timeout");
+      timedOut = true;
+      abortController.abort("Timeout");
     }, WAIT_FOR_SIGNATURE_TIMEOUT_MS);
 
     try {
       const res = await request.waitForSignature({
-        signal: this.abortController.signal,
+        signal: abortController.signal,
       });
       log.debug("res", res);
       return res;
+    } catch (e) {
+      if (timedOut) {
+        throw new AutogramError(
+          "timeout",
+          "Časový limit na podpísanie v mobile vypršal",
+          { cause: e }
+        );
+      }
+      throw e;
     } finally {
       clearTimeout(timeout);
+      externalSignal?.removeEventListener("abort", onExternalAbort);
     }
   }
 
@@ -115,20 +152,31 @@ export class AvmSimpleChannel implements AutogramVMobileIntegrationInterfaceStat
     this.abortController?.abort("Aborted");
   }
   async reset(): Promise<void> {
+    // a wait still running belongs to the request being dropped
+    this.abortController?.abort("Reset");
     this.request = null;
     this.abortController = null;
+    // The signing finished or was cancelled while the page was alive, so
+    // there is nothing to restore; only a page that went away mid-signing
+    // (and never got to reset) leaves its restore point behind.
+    const restorePoint = this.restorePoint;
+    this.restorePoint = null;
+    if (restorePoint) {
+      await this.restorePoints.remove(restorePoint);
+    }
   }
 
   async useRestorePoint(restorePoint: string): Promise<SignedObject | null> {
-    const result = await this.restorePoints.use(
-      restorePoint,
-      this.request?.token ?? null
-    );
-    if (result.outcome === "none") {
-      return null;
+    const result = await this.restorePoints.use(restorePoint);
+    if (result.outcome === "signed") {
+      this.restorePoint = null;
+      return result.signedObject;
     }
-    this.request = this.client.resumeRequest(result.token);
-    return result.outcome === "signed" ? result.signedObject : null;
+    // Not signed (yet): the upcoming addDocument() uploads the document
+    // this restore point identifies and binds the two together. A pending
+    // older upload is superseded by it — the user is asked to sign anew.
+    this.restorePoint = restorePoint;
+    return null;
   }
 
   private currentRequest(): SignatureRequest {

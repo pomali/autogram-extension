@@ -1,11 +1,9 @@
 name: Live portals
 
 # Tests that depend on the production government portals: too flaky (and
-# too slow) to gate pull requests, valuable as an early warning that a
-# portal changed its signer.
+# too slow) to gate pull requests. Run by hand (Actions → Live portals →
+# Run workflow) — e.g. before a release, or when a portal is reported broken.
 on:
-  schedule:
-    - cron: "17 3 * * *"
   workflow_dispatch:
 
 permissions:

@@ -259,24 +259,21 @@ export class RestorePointStore {
   ) {}
 
   /**
-   * Look up `restorePoint`; if absent, persist `currentToken` under it
-   * (creating the restore point for a future reload) and report `none`.
-   * If present, check the server: `signed` returns the signed object and
-   * removes the restore point, `pending` returns the token so the caller
-   * can resume waiting.
+   * Look up `restorePoint` and check its request on the server: `signed`
+   * returns the signed object and removes the restore point, `pending`
+   * returns the token so the caller can resume waiting, anything else is
+   * `none`.
+   *
+   * This never creates a restore point. Call {@link save} once the
+   * document the restore point stands for has been uploaded — binding the
+   * identifier to any earlier request would hand back another document's
+   * signature after a reload.
    */
-  async use(
-    restorePoint: string,
-    currentToken: RequestToken | null
-  ): Promise<RestorePointResult> {
+  async use(restorePoint: string): Promise<RestorePointResult> {
     const key = this.keyPrefix + restorePoint;
     const stored = await this.loadToken(key);
 
     if (!stored) {
-      if (currentToken) {
-        await this.db.set(key, currentToken);
-        log.info("Created new restore point", restorePoint);
-      }
       return { outcome: "none" };
     }
 
@@ -306,6 +303,23 @@ export class RestorePointStore {
       log.error("Error checking restore point", error);
       return { outcome: "none" };
     }
+  }
+
+  /**
+   * Bind `restorePoint` to the request of the document it identifies,
+   * replacing whatever it pointed to before.
+   */
+  async save(restorePoint: string, token: RequestToken): Promise<void> {
+    await this.db.set(this.keyPrefix + restorePoint, token);
+    log.info("Saved restore point", restorePoint);
+  }
+
+  /**
+   * Forget `restorePoint` — the signing it was created for finished (or
+   * was cancelled) in this page, so there is nothing left to restore.
+   */
+  async remove(restorePoint: string): Promise<void> {
+    await this.db.set(this.keyPrefix + restorePoint, undefined);
   }
 
   private async loadToken(key: string): Promise<RequestToken | null> {

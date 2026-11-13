@@ -4,6 +4,15 @@ import { SignRequest } from "../ditecx/sign-request";
 import type { ObjectXadesBpTxt } from "../ditecx/types";
 import { DBridgeAutogramImpl } from "./autogram-implementation";
 
+import { webcrypto } from "crypto";
+import { TextEncoder } from "util";
+
+// jsdom has neither SubtleCrypto nor TextEncoder (restore point hashing)
+if (!globalThis.crypto?.subtle) {
+  Object.defineProperty(globalThis, "crypto", { value: webcrypto });
+}
+Object.assign(globalThis, { TextEncoder });
+
 // The dialog client is replaced by a fake; don't register its custom elements.
 jest.mock("autogram-sdk/with-ui", () => ({ createAutogramClient: jest.fn() }));
 
@@ -82,5 +91,41 @@ describe("DBridgeAutogramImpl.getSignature", () => {
     await impl.sign("sig-1", "alg", "policy");
     impl.addObject(TXT);
     await expect(impl.getSignature({}, true)).resolves.toBe("signed");
+  });
+});
+
+describe("DBridgeAutogramImpl.getSignature with a restore point", () => {
+  const RESTORED = {
+    content: "c2lnbmVk", // base64 of "signed"
+    signedBy: "CN=John Smith",
+    issuedBy: "CN=SVK eID ACA2",
+  };
+
+  function createRestoringImpl() {
+    const { impl, client } = createImpl();
+    (
+      impl as unknown as { extensionOptions: ExtensionOptions }
+    ).extensionOptions = { restorePointEnabled: true } as ExtensionOptions;
+    client.useRestorePoint.mockResolvedValue(RESTORED as never);
+    return { impl, client };
+  }
+
+  test("a restored signature is decoded when the portal asked for decoded content", async () => {
+    // getSignedXmlWithEnvelope() passes decodeBase64 = true; handing the
+    // portal base64 there would make it submit garbage
+    const { impl, client } = createRestoringImpl();
+    await impl.sign("sig-1", "alg", "policy");
+    impl.addObject(TXT);
+
+    await expect(impl.getSignature({}, true)).resolves.toBe("signed");
+    expect(client.sign).not.toHaveBeenCalled();
+  });
+
+  test("a restored signature stays base64 otherwise", async () => {
+    const { impl } = createRestoringImpl();
+    await impl.sign("sig-1", "alg", "policy");
+    impl.addObject(TXT);
+
+    await expect(impl.getSignature({})).resolves.toBe(RESTORED.content);
   });
 });

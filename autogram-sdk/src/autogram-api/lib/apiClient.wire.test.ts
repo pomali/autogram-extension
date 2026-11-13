@@ -96,12 +96,24 @@ describe("signLegacy: POST /sign", () => {
     });
   });
 
-  test("returns error bodies as-is (no status check besides 204)", async () => {
-    const errorBody = { code: "SIGNING_FAILED", message: "boom" };
-    respond(400, errorBody);
-    await expect(client().signLegacy({ content: "<a/>" })).resolves.toEqual(
-      errorBody
-    );
+  test.each([400, 404, 422, 500])(
+    "rejects a %i error response instead of returning its body as a signature",
+    async (status) => {
+      respond(status, { code: "SIGNING_FAILED", message: "boom" });
+      await expect(
+        client().signLegacy({ content: "<a/>" })
+      ).rejects.toMatchObject({ code: "server-error", message: "boom" });
+    }
+  );
+
+  test("rejects an error response without a JSON body", async () => {
+    respond(500);
+    await expect(
+      client().signLegacy({ content: "<a/>" })
+    ).rejects.toMatchObject({
+      code: "server-error",
+      message: "Autogram request failed with status 500",
+    });
   });
 });
 

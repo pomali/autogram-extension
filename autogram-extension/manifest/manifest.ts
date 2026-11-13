@@ -117,6 +117,8 @@ export function generateManifest(
                 .map((key) => entries[key].map((x) => [x, x + ".map"]).flat())
                 .flat(),
               "static/logo-64.png",
+              // embedded as a frame by the signing dialog (pairing.ts)
+              "static/pairing.html",
             ],
             matches: enabledUrls,
           },
@@ -196,6 +198,7 @@ export function generateManifest(
             .map((key) => entries[key].map((x) => [x, x + ".map"]).flat())
             .flat(),
           "static/logo-64.png",
+          "static/pairing.html",
           ...enabledUrls,
         ],
         // TODO check if this is needed

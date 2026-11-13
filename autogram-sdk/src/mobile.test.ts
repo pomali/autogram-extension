@@ -202,20 +202,26 @@ describe("toSignedObject", () => {
 });
 
 describe("RestorePointStore", () => {
-  test("saves the current token when no restore point exists", async () => {
+  test("looking up a missing restore point never creates one", async () => {
     const db = memoryDb();
     const store = new RestorePointStore(db, new MobileClient(fakeBackend()));
-    const result = await store.use("rp-1", TOKEN);
-    expect(result).toEqual({ outcome: "none" });
-    expect(db.data.get("restorePoint:rp-1")).toEqual(TOKEN);
-  });
-
-  test("does nothing without a restore point or current token", async () => {
-    const db = memoryDb();
-    const store = new RestorePointStore(db, new MobileClient(fakeBackend()));
-    const result = await store.use("rp-1", null);
+    const result = await store.use("rp-1");
     expect(result).toEqual({ outcome: "none" });
     expect(db.data.size).toBe(0);
+  });
+
+  test("save binds the restore point to a request, remove forgets it", async () => {
+    const db = memoryDb();
+    const store = new RestorePointStore(db, new MobileClient(fakeBackend()));
+    await store.save("rp-1", TOKEN);
+    expect(db.data.get("restorePoint:rp-1")).toEqual(TOKEN);
+    expect(await store.use("rp-1")).toEqual({
+      outcome: "pending",
+      token: TOKEN,
+    });
+
+    await store.remove("rp-1");
+    expect(await store.use("rp-1")).toEqual({ outcome: "none" });
   });
 
   test("returns the signed object and cleans up when the document is signed", async () => {
@@ -228,7 +234,7 @@ describe("RestorePointStore", () => {
       }),
     });
     const store = new RestorePointStore(db, new MobileClient(backend));
-    const result = await store.use("rp-1", null);
+    const result = await store.use("rp-1");
     expect(result).toEqual({
       outcome: "signed",
       token: TOKEN,
@@ -241,7 +247,7 @@ describe("RestorePointStore", () => {
     const db = memoryDb();
     await db.set("restorePoint:rp-1", TOKEN);
     const store = new RestorePointStore(db, new MobileClient(fakeBackend()));
-    const result = await store.use("rp-1", null);
+    const result = await store.use("rp-1");
     expect(result).toEqual({ outcome: "pending", token: TOKEN });
   });
 
@@ -252,7 +258,7 @@ describe("RestorePointStore", () => {
       checkDocumentStatus: async () => ({ status: "not found" }),
     });
     const store = new RestorePointStore(db, new MobileClient(backend));
-    expect(await store.use("rp-1", null)).toEqual({ outcome: "none" });
+    expect(await store.use("rp-1")).toEqual({ outcome: "none" });
   });
 
   test("swallows status check failures", async () => {
@@ -264,7 +270,7 @@ describe("RestorePointStore", () => {
       },
     });
     const store = new RestorePointStore(db, new MobileClient(backend));
-    expect(await store.use("rp-1", null)).toEqual({ outcome: "none" });
+    expect(await store.use("rp-1")).toEqual({ outcome: "none" });
   });
 
   test("dereferences the legacy string-pointer format", async () => {
@@ -281,7 +287,7 @@ describe("RestorePointStore", () => {
       new MobileClient(fakeBackend()),
       "autogram:avm:restorePoint:"
     );
-    const result = await store.use("rp-1", null);
+    const result = await store.use("rp-1");
     expect(result).toEqual({ outcome: "pending", token: TOKEN });
   });
 
@@ -292,7 +298,7 @@ describe("RestorePointStore", () => {
       new MobileClient(fakeBackend()),
       "autogram:avm:restorePoint:"
     );
-    await store.use("rp-1", TOKEN);
+    await store.save("rp-1", TOKEN);
     expect(db.data.get("autogram:avm:restorePoint:rp-1")).toEqual(TOKEN);
   });
 });

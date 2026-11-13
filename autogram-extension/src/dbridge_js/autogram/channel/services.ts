@@ -46,14 +46,16 @@ export const avmService = defineRpcService("avm", {
     timeoutMs: 10_000,
     timeoutMessage: "Časový limit vytvorenia QR kódu vypršal",
   },
-  getPairingQrCodeUrl: {
-    args: z.null(),
-    result: ZUrl,
-    timeoutMs: 10_000,
-    timeoutMessage: "Časový limit vytvorenia párovacieho QR kódu vypršal",
-  },
+  // No `getPairingQrCodeUrl` here, on purpose: every script of the host
+  // page can call this service, and the pairing URL carries a token that
+  // is enough to pair a phone with the extension. The pairing QR code is
+  // rendered by an extension-owned frame instead (entrypoint/pairing.ts).
   addDocument: {
-    args: z.object({ documentToSign: ZAVMDocumentToSign }),
+    args: z.object({
+      documentToSign: ZAVMDocumentToSign,
+      /** restore point this document is uploaded for, see web.ts */
+      restorePoint: z.optional(z.string()),
+    }),
     result: z.null(),
     timeoutMs: 10_000,
     timeoutMessage: "Časový limit pridania dokumentu vypršal",
@@ -76,7 +78,10 @@ export const avmService = defineRpcService("avm", {
     // long-running: resolves when the user signs on the mobile device
   },
   reset: {
-    args: z.null(),
+    args: z.object({
+      /** restore point of the signing that just ended in the page */
+      restorePoint: z.optional(z.string()),
+    }),
     result: z.null(),
     timeoutMs: 10_000,
     timeoutMessage: "Časový limit na reset vypršal",

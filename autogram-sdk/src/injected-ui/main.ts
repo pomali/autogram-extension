@@ -153,9 +153,29 @@ export class AutogramRoot extends LitElement {
 
   _closeChoiceScreen(event: EventClose) {
     log.debug("_closeScreen");
-    // TODO check if this works correctly
-    this.choiceResult?.reject(new UserCancelledSigningException());
+    if (this.choiceResult) {
+      // the caller shows the "signing cancelled" screen
+      this.settlePendingPrompts();
+    } else {
+      // the choice was already made and the next screen never came up
+      // (preparing the signing failed) — nothing is waiting, just close
+      this._closeNow(event);
+    }
+  }
+
+  /**
+   * Settles whatever the dialog is still waiting on as "dismissed", so no
+   * caller is left with a promise that never resolves — however the dialog
+   * went away (close button, Escape, a new signing replacing the screen).
+   */
+  private settlePendingPrompts() {
+    const choice = this.choiceResult;
     this.choiceResult = null;
+    choice?.reject(new UserCancelledSigningException());
+
+    const restorePoint = this.restorePointResult;
+    this.restorePointResult = null;
+    restorePoint?.resolve(false);
   }
 
   _closeSigningScreen(event: EventClose) {
@@ -169,6 +189,7 @@ export class AutogramRoot extends LitElement {
 
   _closeNow(_event: Event) {
     log.debug("_closeNow");
+    this.settlePendingPrompts();
     this.reset();
     this.hide();
   }
@@ -317,6 +338,8 @@ export class AutogramRoot extends LitElement {
       return Promise.resolve(SigningMethod.mobileOnMobile);
     }
 
+    // a prompt still open from an earlier call is replaced, not orphaned
+    this.settlePendingPrompts();
     this.screen = Screens.choice;
     this.show();
 
@@ -330,6 +353,7 @@ export class AutogramRoot extends LitElement {
   public async maybeRestoreRestorePoint() {
     log.debug("maybeRestoreRestorePoint");
 
+    this.settlePendingPrompts();
     this.restorePointResult = promiseWithResolvers<boolean>();
     this.screen = Screens.useRestorePoint;
     this.show();
@@ -407,12 +431,23 @@ export class AutogramRoot extends LitElement {
     this.abortController = null;
   }
 
+  /** the `<dialog>` whose `close` event is already wired up */
+  private wiredDialog: HTMLDialogElement | null = null;
+  /** `close` events to ignore because {@link hide} closed the dialog itself */
+  private programmaticCloses = 0;
+
   show() {
+    // a pending auto-hide belongs to the screen being replaced
+    if (this.hideTimeout) {
+      clearTimeout(this.hideTimeout);
+      this.hideTimeout = null;
+    }
     // Remove inert immediately in case it was already set before show() was called.
     this.removeAttribute("inert");
     this.style.display = "flex";
     // Start watching for the host page re-adding the inert attribute and strip it
     // straight away so our dialog remains interactive for the duration of signing.
+    this.inertObserver?.disconnect();
     this.inertObserver = new MutationObserver(() => {
       this.removeAttribute("inert");
     });
@@ -425,11 +460,25 @@ export class AutogramRoot extends LitElement {
     if (!dialog) {
       return;
     }
-    dialog.addEventListener("close", () => {
-      log.debug("dialog closed");
-      this._closeNow(new Event("close"));
-    });
-    dialog.showModal();
+    if (this.wiredDialog !== dialog) {
+      // once per element — show() runs for every signing
+      this.wiredDialog = dialog;
+      dialog.addEventListener("close", () => {
+        log.debug("dialog closed");
+        if (this.programmaticCloses > 0) {
+          // The event of our own hide(). It is delivered asynchronously,
+          // possibly after the next signing reopened the dialog — treating
+          // it as "the user closed the dialog" would tear that one down.
+          this.programmaticCloses--;
+          return;
+        }
+        // closed by the user (Escape)
+        this._closeNow(new Event("close"));
+      });
+    }
+    if (!dialog.open) {
+      dialog.showModal();
+    }
     log.debug("focus dialog after render");
   }
 
@@ -443,6 +492,7 @@ export class AutogramRoot extends LitElement {
     }
     const dialog = this.renderRoot.querySelector("dialog");
     if (dialog && dialog.open) {
+      this.programmaticCloses++;
       dialog.close();
     }
   }

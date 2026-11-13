@@ -4,6 +4,18 @@ import { closeSvg } from "./svg";
 import { unsafeSVG } from "lit/directives/unsafe-svg.js";
 import { EventClose } from "./events";
 import { themeTokens } from "./theme";
+import { toSVG as bwipToSvg } from "@bwip-js/generic";
+
+/**
+ * Whether a pairing URL is a page to embed rather than a link to encode
+ * as a QR code. A browser extension's mobile channel returns the URL of
+ * one of its own pages (`chrome-extension://…`), which renders the QR code
+ * itself: the dialog lives in the host page's DOM, and the real pairing
+ * URL carries a token that host-page scripts must not get hold of.
+ */
+export function isEmbeddedPairingUrl(pairingUrl: string): boolean {
+  return /^(chrome|moz|safari-web)-extension:\/\//.test(pairingUrl);
+}
 
 export class AutogramBaseScreen extends LitElement {
   static styles: CSSResultGroup = [
@@ -345,6 +357,13 @@ export class AutogramBaseScreen extends LitElement {
         margin: 0;
       }
 
+      .qr-frame {
+        display: block;
+        width: 220px;
+        height: 220px;
+        border: 0;
+      }
+
       .qr figure svg {
         display: block;
         width: 100%;
@@ -481,6 +500,38 @@ export class AutogramBaseScreen extends LitElement {
   }
 
   /** A clickable QR code; `svg` is markup produced by bwip-js. */
+  /**
+   * The pairing code: a QR code of `pairingUrl`, or — when the integration
+   * hands out the URL of its own page instead (see
+   * {@link isEmbeddedPairingUrl}) — that page in a frame. The frame keeps
+   * the pairing token out of the host page's DOM.
+   */
+  renderPairingCode(pairingUrl: string, label: string) {
+    if (isEmbeddedPairingUrl(pairingUrl)) {
+      return html`
+        <div class="qr">
+          <iframe
+            class="qr-frame"
+            src="${pairingUrl}"
+            title="${label}"
+            referrerpolicy="no-referrer"
+          ></iframe>
+        </div>
+      `;
+    }
+    return this.renderQrCode(
+      pairingUrl,
+      bwipToSvg({
+        bcid: "qrcode",
+        text: pairingUrl,
+        scale: 6,
+        width: 100,
+        height: 100,
+      }),
+      label
+    );
+  }
+
   renderQrCode(url: string, svg: string, label: string) {
     return html`
       <a class="qr" href="${url}" target="_blank" rel="noopener">

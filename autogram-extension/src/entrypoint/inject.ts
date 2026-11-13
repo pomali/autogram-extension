@@ -1,4 +1,6 @@
+import { setLogLevel } from "autogram-sdk";
 import { inject } from "../dbridge_js/inject-ditec";
+import { rememberExtensionBaseUrl } from "../dbridge_js/autogram/extension-pages";
 import { createLogger } from "../log";
 import {
   defaultOptionsStorage,
@@ -9,6 +11,12 @@ import { captureException } from "../sentry";
 import { maybeInsertUpvsJsFixes } from "../upvs-fixes";
 
 const log = createLogger("ag-ext.ent.inject");
+// must run while the bundle evaluates (document.currentScript)
+rememberExtensionBaseUrl(document.currentScript);
+// the SDK is quiet by default; development builds get its debug output
+if (!__IS_PRODUCTION__) {
+  setLogLevel("debug");
+}
 try {
   const windowAny = window as WindowWithDitec;
 

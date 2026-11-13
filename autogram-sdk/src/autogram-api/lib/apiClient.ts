@@ -28,6 +28,19 @@ async function parseSigningResponse<T>(response: Response): Promise<T> {
       body?.message || "Autogram request failed with status 502"
     );
   }
+  if (response.status < 200 || response.status >= 300) {
+    // 400/404/422/500…: the body is an error description, not a signed
+    // document — never hand it back as a successful result
+    const body = (await response.json().catch(() => undefined)) as
+      | { code?: string; message?: string; details?: string }
+      | undefined;
+    throw new AutogramError(
+      "server-error",
+      body?.message ||
+        `Autogram request failed with status ${response.status}`,
+      { cause: body }
+    );
+  }
   return response.json() as Promise<T>;
 }
 
